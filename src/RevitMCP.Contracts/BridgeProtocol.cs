@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text.Json;
 
 namespace RevitMCP.Contracts;
@@ -7,7 +8,7 @@ public sealed record BridgeRequest(string Operation, long? ElementId = null, int
 {
     public void Validate()
     {
-        if (Operation is not ("get_active_document" or "get_selection" or "get_element_info" or "list_levels" or "list_elements" or "list_walls"))
+        if (Operation is not ("get_active_document" or "get_selection" or "get_element_info" or "list_levels" or "list_elements" or "list_walls" or "list_walls_with_comments"))
             throw new ArgumentException($"Unknown operation: {Operation}");
         if (Offset < 0 || Limit is < 1 or > 100)
             throw new ArgumentException("Offset must be non-negative and limit must be between 1 and 100.");
@@ -29,7 +30,12 @@ public sealed record ElementInfo(long Id, string UniqueId, string Name, string? 
 public sealed record LevelInfo(long Id, string Name, double ElevationFeet);
 public sealed record WallInfo(long Id, long TypeId, string TypeName, string Kind,
     double? LengthFeet, double WidthFeet, double? HeightFeet,
-    string Unit, double? Length, double Width, double? Height, WallPosition? Position);
+    string Unit, double? Length, double Width, double? Height, WallPosition? Position, string? Comments = null)
+{
+    public string? LengthFormatted => Length?.ToString("0.##", CultureInfo.InvariantCulture);
+    public string WidthFormatted => Width.ToString("0.##", CultureInfo.InvariantCulture);
+    public string? HeightFormatted => Height?.ToString("0.##", CultureInfo.InvariantCulture);
+}
 public sealed record PointInfo(double X, double Y, double Z);
 public sealed record WallPosition(PointInfo Start, PointInfo End)
 {

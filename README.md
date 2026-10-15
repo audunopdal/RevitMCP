@@ -105,6 +105,7 @@ Other Revit versions do not host this add-in.
 | `get_element_info` | Positive 64-bit `elementId` | ID, unique ID, name, category, type ID |
 | `list_levels` | `offset=0`, `limit=100` | Page of levels ordered by elevation and ID |
 | `list_walls` | `offset=0`, `limit=100` | Page of walls ordered by element ID, with type, dimensions and shared-coordinate endpoints; mm for metric models, ft otherwise |
+| `list_walls_with_comments` | `offset=0`, `limit=100` | Same wall data, restricted to walls with non-blank instance Comments |
 | `list_elements` | `offset=0`, `limit=100`, `modelObjectsOnly=false` | Page of document elements ordered by ID, with the same metadata as `get_element_info` |
 
 Pages contain `items`, `total`, `offset`, and `nextOffset` (null at the end).
@@ -159,6 +160,10 @@ Position is null when a bounded location curve is unavailable.
 For backwards compatibility, `lengthFeet`, `widthFeet` and `heightFeet` remain
 available and always contain internal-unit feet, independent of `unit`. New
 clients should use `length`, `width`, `height` and `position` with `unit`.
+For display, `lengthFormatted`, `widthFormatted` and `heightFormatted` contain
+up to two decimal places, a decimal point and no thousands separators
+(for example, `"7800"`). Unavailable length/height values remain null.
+The numeric dimension fields retain their full precision.
 This unit selection applies only to `list_walls`; `list_levels` is unchanged.
 
 To retrieve all walls, call `list_walls` repeatedly with `offset` set to the
@@ -166,6 +171,14 @@ previous page's `nextOffset` until it is null. As with `list_elements`, avoid
 model edits, unit/shared-coordinate changes or document switches while paging.
 Example chat request: "List all walls with element ID, type and dimensions;
 follow every page of list_walls."
+
+`list_walls_with_comments` uses the built-in **instance Comments** parameter,
+not Type Comments or a custom parameter with the same name. Missing, empty
+and whitespace-only comments are excluded. Filtering happens before paging,
+so `total` and `nextOffset` describe only matching walls. It otherwise uses
+the same scope, units, positions and formatted dimensions as `list_walls`.
+Both wall tools include `comments`, preserving the original text (null if
+the parameter has no value). `list_walls` still includes walls without comments.
 
 After adding or updating tools, stop the `revit` MCP server in VS Code, close
 Revit, rerun `scripts\Install-Addin.ps1`, restart Revit and reopen the model,

@@ -33,6 +33,11 @@ public sealed class RevitTools(RevitBridgeClient bridge)
     public Task<JsonElement> ListWalls(CancellationToken cancellationToken, int offset = 0, int limit = 100) =>
         bridge.SendAsync(new BridgeRequest("list_walls", Offset: offset, Limit: limit), cancellationToken);
 
+    [McpServerTool(Name = "list_walls_with_comments", ReadOnly = true, OpenWorld = false)]
+    [Description("List only Wall instances whose built-in instance Comments parameter contains non-whitespace text (not Type Comments). Returns the same metadata, dimensions and shared-coordinate endpoints as list_walls, plus comments. Dimensions and positions use unit mm for metric project length units, ft otherwise; legacy fields ending Feet remain feet. Includes hidden walls, excludes linked documents. Filtering occurs before pagination; total and nextOffset refer only to matching walls, ordered by ID. Follow nextOffset until null. Limit must be 1 to 100; offset must be non-negative.")]
+    public Task<JsonElement> ListWallsWithComments(CancellationToken cancellationToken, int offset = 0, int limit = 100) =>
+        bridge.SendAsync(new BridgeRequest("list_walls_with_comments", Offset: offset, Limit: limit), cancellationToken);
+
     [McpServerTool(Name = "list_elements", ReadOnly = true, OpenWorld = false)]
     [Description("Get a page of element metadata ordered by ID. By default includes all document elements. Set modelObjectsOnly=true for only non-type elements with a Model category across the entire document, regardless of visibility in the active view. Linked document contents are excluded. Follow nextOffset until null. Limit must be 1 to 100; offset must be non-negative.")]
     public Task<JsonElement> ListElements(CancellationToken cancellationToken, int offset = 0, int limit = 100,

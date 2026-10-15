@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using Autodesk.Revit.UI;
 
 namespace RevitMCP.Addin;
@@ -67,5 +68,12 @@ public sealed class App : IExternalApplication
 			PipeName = Environment.GetEnvironmentVariable("REVITMCP_PIPENAME") ?? "RevitMCP"
 			// Add more as needed
 		};
+	}
+
+	// Example: formatting a wall's width and height
+	public string FormatDimension(double value)
+	{
+		// Formats the value with up to 2 decimal places, no thousand separator
+		return value.ToString("0.##", CultureInfo.InvariantCulture);
 	}
 }

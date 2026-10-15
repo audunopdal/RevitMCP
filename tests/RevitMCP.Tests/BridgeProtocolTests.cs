@@ -75,6 +75,9 @@ public sealed class BridgeProtocolTests
     [InlineData("list_walls", null, 0, 101)]
     [InlineData("list_walls", null, -1, 100)]
     [InlineData("list_walls", null, 0, 0)]
+    [InlineData("list_walls_with_comments", null, 0, 101)]
+    [InlineData("list_walls_with_comments", null, -1, 100)]
+    [InlineData("list_walls_with_comments", null, 0, 0)]
     [InlineData("get_element_info", null, 0, 10)]
     [InlineData("get_element_info", 0L, 0, 10)]
     [InlineData("get_element_info", -1L, 0, 10)]
@@ -97,6 +100,33 @@ public sealed class BridgeProtocolTests
         Assert.Equal(5_000_000_000, data.GetProperty("items")[0].GetProperty("id").GetInt64());
         Assert.Equal(12.5, data.GetProperty("items")[0].GetProperty("elevationFeet").GetDouble());
         Assert.Null(response.Error);
+    }
+
+    [Theory]
+    [InlineData("en-US")]
+    [InlineData("nb-NO")]
+    public void WallDimensionsAreFormattedWithoutGrouping(string culture)
+    {
+        var originalCulture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo(culture);
+            var wall = new WallInfo(1, 2, "Wall", "Basic", null, 0, null,
+                "mm", 7800.125, 200, 9600, null);
+            JsonElement data = BridgeResponse.Success(wall).Data!.Value;
+            Assert.Equal("7800.13", data.GetProperty("lengthFormatted").GetString());
+            Assert.Equal("200", data.GetProperty("widthFormatted").GetString());
+            Assert.Equal("9600", data.GetProperty("heightFormatted").GetString());
+            Assert.Equal(7800.125, data.GetProperty("length").GetDouble());
+            var unavailable = wall with { Length = null, Height = null };
+            Assert.Null(unavailable.LengthFormatted);
+            Assert.Null(unavailable.HeightFormatted);
+            Assert.Equal("0", (wall with { Width = 0 }).WidthFormatted);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = originalCulture;
+        }
     }
 
     [Theory]

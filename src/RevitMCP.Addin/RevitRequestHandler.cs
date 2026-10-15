@@ -36,6 +36,7 @@ internal sealed class RevitRequestHandler(TraceSource log) : IExternalEventHandl
                     "get_element_info" => BridgeResponse.Success(GetElement(document, pending.Request.ElementId!.Value)),
                     "list_levels" => BridgeResponse.Success(GetLevels(document, pending.Request)),
                     "list_walls" => BridgeResponse.Success(GetWalls(document, pending.Request)),
+                    "list_walls_with_comments" => BridgeResponse.Success(GetWalls(document, pending.Request, commentsOnly: true)),
                     "list_elements" => BridgeResponse.Success(GetElements(document, pending.Request)),
                     _ => throw new ArgumentException($"Unknown operation: {pending.Request.Operation}")
                 };
@@ -73,7 +74,7 @@ internal sealed class RevitRequestHandler(TraceSource log) : IExternalEventHandl
         return GetPage(levels, request);
     }
 
-    private static Page<WallInfo> GetWalls(Document document, BridgeRequest request)
+    private static Page<WallInfo> GetWalls(Document document, BridgeRequest request, bool commentsOnly = false)
     {
         using Units units = document.GetUnits();
         using FormatOptions lengthFormat = units.GetFormatOptions(SpecTypeId.Length);
@@ -94,7 +95,9 @@ internal sealed class RevitRequestHandler(TraceSource log) : IExternalEventHandl
 
         using var collector = new FilteredElementCollector(document);
         Wall[] walls = collector.OfClass(typeof(Wall)).WhereElementIsNotElementType()
-            .Cast<Wall>().OrderBy(wall => wall.Id.Value).ToArray();
+            .Cast<Wall>()
+            .Where(wall => !commentsOnly || !string.IsNullOrWhiteSpace(GetWallComments(wall)))
+            .OrderBy(wall => wall.Id.Value).ToArray();
         Page<Wall> page = GetPage(walls, request);
         WallInfo[] items = page.Items.Select(wall =>
         {
@@ -109,10 +112,13 @@ internal sealed class RevitRequestHandler(TraceSource log) : IExternalEventHandl
             return new WallInfo(wall.Id.Value, type.Id.Value, type.Name, type.Kind.ToString(),
                 length, wall.Width, height, metric ? "mm" : "ft",
                 length.HasValue ? ConvertLength(length.Value) : null, ConvertLength(wall.Width),
-                height.HasValue ? ConvertLength(height.Value) : null, position);
+                height.HasValue ? ConvertLength(height.Value) : null, position, GetWallComments(wall));
         }).ToArray();
         return new Page<WallInfo>(items, page.Total, page.Offset, page.NextOffset);
     }
+
+    private static string? GetWallComments(Wall wall) =>
+        wall.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
 
     private static Page<ElementInfo> GetElements(Document document, BridgeRequest request)
     {
