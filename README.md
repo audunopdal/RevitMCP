@@ -1,0 +1,199 @@
+# RevitMCP
+
+A local, read-only MCP server for Autodesk Revit 2026, implemented in C#.
+
+## Architecture
+
+```text
+VS Code -> MCP over stdio -> RevitMCP.Server
+        -> current-user-only named pipe -> RevitMCP.Addin
+        -> ExternalEvent -> Revit API
+```
+
+- [Server](src/RevitMCP.Server) exposes MCP tools using the official C# SDK.
+- [Add-in](src/RevitMCP.Addin) runs inside Revit 2026. All document reads happen
+  in `IExternalEventHandler.Execute`, never on the pipe listener thread.
+- [Contracts](src/RevitMCP.Contracts) contains API-independent DTOs and bounded
+  length-prefixed JSON framing.
+- [Tests](tests/RevitMCP.Tests) exercise framing, validation, named pipes and MCP.
+
+There are no model-editing tools or arbitrary code execution endpoints.
+
+## Prerequisites
+
+- Windows, Revit 2026, and a .NET SDK capable of targeting .NET 8.
+- .NET 8 runtime for the console server.
+- VS Code with an MCP-capable chat client.
+
+The add-in references the installed Revit 2026 API assemblies without copying
+them into its output. The default installation path is
+`C:\Program Files\Autodesk\Revit 2026`. Override it with
+`-p:RevitInstallDir="your installation directory"` when building.
+
+## Build and test
+
+```powershell
+dotnet build .\RevitMCP.sln -c Release
+dotnet test .\tests\RevitMCP.Tests\RevitMCP.Tests.csproj -c Release
+```
+
+Tests do not require Revit to be running. Loading the add-in and reading a real
+document must also be verified manually in Revit.
+
+## Install and connect
+
+Close Revit and stop the `revit` MCP server, then run from the repository root:
+
+```powershell
+.\scripts\Install-Addin.ps1
+```
+
+This publishes both components under `artifacts` and creates
+`%APPDATA%\Autodesk\Revit\Addins\2026\RevitMCP.addin` pointing to the local add-in.
+It does not commit or push anything. Moving the repository requires rerunning
+the script. Do not commit generated manifests containing local paths.
+
+### Install a Debug build
+
+The installer defaults to Release. For unoptimized Debug builds of both the
+add-in and MCP server, with matching PDB symbols, run:
+
+```powershell
+.\scripts\Install-Addin.ps1 -Configuration Debug
+```
+
+From Command Prompt instead of PowerShell:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\Repos\RevitMCP\scripts\Install-Addin.ps1" -Configuration Debug
+```
+
+Debug and Release installations use the same output folders and manifest.
+No MCP configuration changes are needed. Restart Revit and the MCP server after
+installation. Attach VS Code's C# debugger to `Revit.exe` to debug the add-in,
+or to the `dotnet.exe` process running `RevitMCP.Server.dll` to debug the server.
+Requests can time out when paused at a breakpoint for more than 30 seconds.
+To switch back, close both processes and run the installer without
+`-Configuration Debug` (or explicitly use `-Configuration Release`).
+
+### Start and verify
+
+1. Start Revit 2026 and accept the add-in loading prompt if shown.
+2. Open a model.
+3. Open this repository in VS Code.
+4. Use **MCP: List Servers**, select `revit`, and start it. The workspace
+   [MCP configuration](.vscode/mcp.json) uses the published console server.
+5. Enable its tools in chat and invoke `get_active_document`.
+6. Verify that the title matches the active Revit document.
+
+The server resolves the single running Revit process when a tool is called.
+For multiple Revit instances, append `"--revit-process-id", "12345"` to `args`
+in the MCP configuration, using the desired Revit 2026 PID. Get PIDs with:
+
+```powershell
+Get-Process Revit | Select-Object Id, MainWindowTitle
+```
+
+Other Revit versions do not host this add-in.
+
+## Tools
+
+| Tool | Inputs | Output |
+| --- | --- | --- |
+| `get_active_document` | None | Title, path, family-document flag, read-only flag |
+| `get_selection` | `offset=0`, `limit=100` | Page of selected 64-bit element IDs |
+| `get_element_info` | Positive 64-bit `elementId` | ID, unique ID, name, category, type ID |
+| `list_levels` | `offset=0`, `limit=100` | Page of levels ordered by elevation and ID |
+| `list_walls` | `offset=0`, `limit=100` | Page of walls ordered by element ID, with type, dimensions and shared-coordinate endpoints; mm for metric models, ft otherwise |
+| `list_elements` | `offset=0`, `limit=100`, `modelObjectsOnly=false` | Page of document elements ordered by ID, with the same metadata as `get_element_info` |
+
+Pages contain `items`, `total`, `offset`, and `nextOffset` (null at the end).
+Limits must be 1 through 100; offsets must be non-negative.
+Level elevations are in Revit internal units (feet). Element information is
+basic metadata; parameter inspection is not implemented.
+
+`list_elements` includes element instances and types, views, and non-physical
+elements in the active document. Linked-model contents are excluded (the link
+instance itself is included). Only the current page's element metadata is read.
+Use `nextOffset` as the next request's `offset` until it is null. Avoid modifying
+the model or switching documents while paging; each request reads the current
+document and is not a frozen snapshot.
+
+Set `modelObjectsOnly=true` to include only non-type elements whose category is
+`CategoryType.Model`, across the entire document. This excludes element types,
+annotations, views, and uncategorized/internal elements. This is a category-based
+filter, not a geometry or visibility test: hidden model-category instances are
+included, and some model categories can contain non-physical objects.
+The filter is applied before paging, so `total` and `nextOffset` refer to the
+filtered results. Keep the flag unchanged while retrieving subsequent pages.
+Omitting it preserves the original all-elements behavior.
+
+Example chat request: "List all model-category instances using list_elements
+with modelObjectsOnly=true."
+
+`list_walls` returns every `Autodesk.Revit.DB.Wall` instance in the active
+document, regardless of active-view visibility. Linked document contents and
+wall types are excluded. Basic, curtain and stacked walls are included; stacked
+wall containers and their member walls are separate elements, so do not sum
+their dimensions as if they were independent walls.
+
+Each item contains `id` (64-bit element ID), `typeId`, `typeName`, `kind`
+(`Basic`, `Curtain` or `Stacked`), `unit`, `length`, `width`, `height` and `position`.
+The document's Length format determines the output unit: millimetres (`mm`) for
+metric formats (mm, cm, dm, m or m/cm), feet (`ft`) for imperial formats.
+All three dimensions and all position coordinates use that item's `unit`.
+Length is the location-curve length (arc length for curved walls), width is
+Revit's nominal wall width, and height is the model bounding box's vertical
+extent, not the unconnected-height parameter. For slanted, attached or
+profile-edited walls, this height is an overall extent, not a uniform face
+height; width is not a measurement of every panel or layer. Length and height
+are null when the location curve or bounding box is unavailable, not zero.
+`position` contains `start` and `end` points (`x`, `y`, `z`) from the wall's
+location curve, in the active project location's **shared coordinates**:
+X is easting, Y is northing and Z is elevation. `position.coordinateSystem`
+is `"shared"`. These agree with Revit's Report Shared Coordinates, including
+the active project's shared-coordinate rotation and offset. Endpoints are not
+physical wall corners; for curved walls they do not describe the complete arc.
+Position is null when a bounded location curve is unavailable.
+
+For backwards compatibility, `lengthFeet`, `widthFeet` and `heightFeet` remain
+available and always contain internal-unit feet, independent of `unit`. New
+clients should use `length`, `width`, `height` and `position` with `unit`.
+This unit selection applies only to `list_walls`; `list_levels` is unchanged.
+
+To retrieve all walls, call `list_walls` repeatedly with `offset` set to the
+previous page's `nextOffset` until it is null. As with `list_elements`, avoid
+model edits, unit/shared-coordinate changes or document switches while paging.
+Example chat request: "List all walls with element ID, type and dimensions;
+follow every page of list_walls."
+
+After adding or updating tools, stop the `revit` MCP server in VS Code, close
+Revit, rerun `scripts\Install-Addin.ps1`, restart Revit and reopen the model,
+then restart the MCP server and enable the new tools.
+
+## Errors and troubleshooting
+
+- No active document, missing elements, invalid inputs, missing add-in, and
+  disconnected Revit produce tool errors, not success-shaped empty results.
+- Pipe connection timeout is 5 seconds; the total request deadline is 30 seconds.
+  Modal dialogs and active commands may prevent Revit from handling external
+  events. Finish the command or close the dialog, then retry.
+- Pipe access is restricted to the current Windows user. Revit and the server
+  must run as the same user. No TCP port is opened.
+- Server logs go to both stderr and
+  `%LOCALAPPDATA%\RevitMCP\logs\server-<PID>.log`; stdout is reserved for MCP messages.
+- Add-in logs are under `%LOCALAPPDATA%\RevitMCP\logs\revit-<PID>.log`.
+  Both files include timestamps, request operation names, successful completions,
+  elapsed milliseconds and errors. Response payloads and document contents are
+  not logged by the request lifecycle messages. Files are appended and flushed
+  as entries are written, so they can be read while debugging. There is no
+  automatic log rotation; remove old logs when their processes have stopped.
+  Restart Revit if a listener failure is reported.
+- To uninstall, close Revit and remove only
+  `%APPDATA%\Autodesk\Revit\Addins\2026\RevitMCP.addin`.
+
+## References
+
+- [Official MCP C# SDK](https://github.com/modelcontextprotocol/csharp-sdk)
+- [Revit API Developer Guide](https://help.autodesk.com/view/RVT/2026/ENU/)
+- [VS Code MCP configuration](https://code.visualstudio.com/docs/agent-customization/mcp-servers)

@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "revit": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "${workspaceFolder}\\artifacts\\server\\RevitMCP.Server.dll"
+      ]
+    }
+  }
+}
