@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "RevitMCP.Addin": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "REVITMCP_LEVEL": "Verbose",
+        "REVITMCP_PIPENAME": "CustomPipe"
+      }
+    }
+  }
+}
