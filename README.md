@@ -184,6 +184,32 @@ After adding or updating tools, stop the `revit` MCP server in VS Code, close
 Revit, rerun `scripts\Install-Addin.ps1`, restart Revit and reopen the model,
 then restart the MCP server and enable the new tools.
 
+## Export walls to Excel CSV
+
+With Revit running and a model open, run from Command Prompt:
+
+```cmd
+powershell.exe -NoProfile -File "D:\Repos\RevitMCP\scripts\Export-Walls.ps1" -OutputPath "D:\Repos\RevitMCP\walls.csv"
+```
+
+Live export requires Node.js/npm and uses MCP Inspector through `npx` (downloaded
+automatically if needed). It retrieves all pages. Add `-CommentsOnly` for walls
+with non-blank instance Comments. Avoid changing the document during export.
+
+To convert an existing complete MCP Inspector response without Node.js:
+
+```cmd
+powershell.exe -NoProfile -File "D:\Repos\RevitMCP\scripts\Export-Walls.ps1" -InputPath "D:\Repos\RevitMCP\walls.json" -OutputPath "D:\Repos\RevitMCP\walls.csv"
+```
+
+Partial-page input files are rejected. The CSV includes IDs, type, dimensions,
+units, shared-coordinate endpoints and Comments. Numbers use up to two decimal
+places without thousands separators. Decimal symbols and column separators
+follow the Windows user's culture for Excel compatibility; UTF-8 with BOM
+preserves non-ASCII comments. Unavailable dimensions/positions are blank.
+Formula-like text is prefixed with an apostrophe to prevent Excel execution.
+An existing output file is overwritten only after retrieval and conversion succeed.
+
 ## Errors and troubleshooting
 
 - No active document, missing elements, invalid inputs, missing add-in, and
