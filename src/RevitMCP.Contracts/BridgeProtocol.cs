@@ -4,16 +4,21 @@ using System.Text.Json;
 
 namespace RevitMCP.Contracts;
 
-public sealed record BridgeRequest(string Operation, long? ElementId = null, int Offset = 0, int Limit = 100, bool ModelObjectsOnly = false)
+public sealed record BridgeRequest(string Operation, long? ElementId = null, int Offset = 0, int Limit = 100,
+    bool ModelObjectsOnly = false, string? ViewName = null)
 {
     public void Validate()
     {
-        if (Operation is not ("get_active_document" or "get_selection" or "get_element_info" or "list_levels" or "list_elements" or "list_walls" or "list_walls_with_comments"))
+        if (Operation is not ("get_active_document" or "get_selection" or "get_element_info" or "list_levels" or "list_elements" or "list_walls" or "list_walls_with_comments" or "list_doors" or "list_door_geometry" or "list_view_elements"))
             throw new ArgumentException($"Unknown operation: {Operation}");
         if (Offset < 0 || Limit is < 1 or > 100)
             throw new ArgumentException("Offset must be non-negative and limit must be between 1 and 100.");
+        if (Operation == "list_door_geometry" && Limit > 5)
+            throw new ArgumentException("Door geometry limit must be between 1 and 5.");
         if (Operation == "get_element_info" && ElementId is not > 0)
             throw new ArgumentException("Element ID must be a positive 64-bit integer.");
+        if (Operation == "list_view_elements" && string.IsNullOrWhiteSpace(ViewName))
+            throw new ArgumentException("View name must not be empty.");
     }
 }
 
@@ -41,6 +46,27 @@ public sealed record WallPosition(PointInfo Start, PointInfo End)
 {
     public string CoordinateSystem => "shared";
 }
+public sealed record DoorGeometryInfo(long Id, string Name, bool GeometryAvailable, string Unit,
+    IReadOnlyList<DoorSolidInfo> Solids, IReadOnlyList<string> OtherGeometryTypes,
+    DoorTransformInfo? TransformShared = null, PointInfo? InsertionPointShared = null,
+    VectorInfo? FacingDirectionShared = null, VectorInfo? HandDirectionShared = null,
+    bool? FacingFlipped = null, bool? HandFlipped = null, long? HostWallId = null,
+    DoorOpeningInfo? Opening = null);
+public sealed record DoorSolidInfo(int Index, int FaceCount, int EdgeCount, double VolumeCubicFeet,
+    double SurfaceAreaSquareFeet, DoorBounds Bounds, IReadOnlyList<DoorEdgeInfo> Edges,
+    DoorComponentInfo? Component = null);
+public sealed record DoorBounds(double XExtent, double YExtent, double ZExtent);
+public sealed record DoorEdgeInfo(int Index, string CurveType, double Length,
+    double? Radius, double? RadiusX, double? RadiusY);
+public sealed record DoorComponentInfo(string Path, DoorLocalBounds Bounds, DoorTransformInfo TransformShared);
+public sealed record DoorLocalBounds(PointInfo Minimum, PointInfo Maximum, double XExtent, double YExtent, double ZExtent);
+public sealed record DoorTransformInfo(PointInfo Origin, VectorInfo BasisX, VectorInfo BasisY, VectorInfo BasisZ)
+{
+    public string CoordinateSystem => "shared";
+}
+public sealed record VectorInfo(double X, double Y, double Z);
+public sealed record DoorOpeningInfo(double? RoughWidth, double? RoughHeight, double? SillHeight,
+    long? BaseLevelId, double? BaseLevelElevationShared, double? BottomElevationShared, double? TopElevationShared);
 public sealed record Page<T>(IReadOnlyList<T> Items, int Total, int Offset, int? NextOffset);
 
 public static class BridgeProtocol

@@ -78,6 +78,15 @@ public sealed class BridgeProtocolTests
     [InlineData("list_walls_with_comments", null, 0, 101)]
     [InlineData("list_walls_with_comments", null, -1, 100)]
     [InlineData("list_walls_with_comments", null, 0, 0)]
+    [InlineData("list_doors", null, 0, 101)]
+    [InlineData("list_doors", null, -1, 100)]
+    [InlineData("list_doors", null, 0, 0)]
+    [InlineData("list_door_geometry", null, 0, 6)]
+    [InlineData("list_door_geometry", null, -1, 1)]
+    [InlineData("list_door_geometry", null, 0, 0)]
+    [InlineData("list_view_elements", null, 0, 101)]
+    [InlineData("list_view_elements", null, -1, 100)]
+    [InlineData("list_view_elements", null, 0, 0)]
     [InlineData("get_element_info", null, 0, 10)]
     [InlineData("get_element_info", 0L, 0, 10)]
     [InlineData("get_element_info", -1L, 0, 10)]
@@ -85,10 +94,69 @@ public sealed class BridgeProtocolTests
         Assert.Throws<ArgumentException>(() => new BridgeRequest(operation, id, offset, limit).Validate());
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ViewElementRequestRequiresViewName(string? viewName) =>
+        Assert.Throws<ArgumentException>(() =>
+            new BridgeRequest("list_view_elements", ViewName: viewName).Validate());
+
+    [Fact]
+    public async Task ViewElementRequestPreservesViewName()
+    {
+        var request = new BridgeRequest("list_view_elements", Offset: 20, Limit: 25, ViewName: "Level 1 - Floor Plan");
+        request.Validate();
+        using var stream = new MemoryStream();
+        await BridgeProtocol.WriteAsync(stream, request, CancellationToken.None);
+        stream.Position = 0;
+        Assert.Equal(request, await BridgeProtocol.ReadAsync<BridgeRequest>(stream, CancellationToken.None));
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(100)]
     public void ValidPageLimitsAreAccepted(int limit) =>
         new BridgeRequest("list_levels", Offset: int.MaxValue, Limit: limit).Validate();
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    public void ValidDoorGeometryPageLimitsAreAccepted(int limit) =>
+        new BridgeRequest("list_door_geometry", Offset: int.MaxValue, Limit: limit).Validate();
+
+    [Fact]
+    public void DoorGeometryPayloadPreservesMeasurements()
+    {
+        var edge = new DoorEdgeInfo(0, "Arc", 120, 60, null, null);
+        var solid = new DoorSolidInfo(0, 6, 12, 4.5, 20,
+            new DoorBounds(900, 2100, 150), new[] { edge },
+            new DoorComponentInfo("root/instance[0]/solid[1]",
+                new DoorLocalBounds(new PointInfo(0, 0, 0), new PointInfo(3, 7, 1), 3, 7, 1),
+                new DoorTransformInfo(new PointInfo(100, 200, 0),
+                    new VectorInfo(0, 1, 0), new VectorInfo(-1, 0, 0), new VectorInfo(0, 0, 1))));
+        var door = new DoorGeometryInfo(123, "Door", true, "mm", new[] { solid }, Array.Empty<string>(),
+            new DoorTransformInfo(new PointInfo(100, 200, 0),
+                new VectorInfo(0, 1, 0), new VectorInfo(-1, 0, 0), new VectorInfo(0, 0, 1)),
+            new PointInfo(100, 200, 0), new VectorInfo(0, 1, 0), new VectorInfo(-1, 0, 0),
+            false, true, 456, new DoorOpeningInfo(950, 2100, 0, 789, 1000, 1000, 3100));
+        JsonElement data = BridgeResponse.Success(new Page<DoorGeometryInfo>(
+            new[] { door }, 1, 0, null)).Data!.Value;
+        JsonElement item = data.GetProperty("items")[0];
+        Assert.Equal(123, item.GetProperty("id").GetInt64());
+        Assert.True(item.GetProperty("geometryAvailable").GetBoolean());
+        Assert.Equal(900, item.GetProperty("solids")[0].GetProperty("bounds").GetProperty("xExtent").GetDouble());
+        Assert.Equal(456, item.GetProperty("hostWallId").GetInt64());
+        Assert.Equal(100, item.GetProperty("insertionPointShared").GetProperty("x").GetDouble());
+        Assert.Equal(950, item.GetProperty("opening").GetProperty("roughWidth").GetDouble());
+        JsonElement component = item.GetProperty("solids")[0].GetProperty("component");
+        Assert.Equal("root/instance[0]/solid[1]", component.GetProperty("path").GetString());
+        Assert.Equal(3, component.GetProperty("bounds").GetProperty("xExtent").GetDouble());
+        Assert.Equal("shared", component.GetProperty("transformShared").GetProperty("coordinateSystem").GetString());
+        JsonElement serializedEdge = item.GetProperty("solids")[0].GetProperty("edges")[0];
+        Assert.Equal(120, serializedEdge.GetProperty("length").GetDouble());
+        Assert.Equal(60, serializedEdge.GetProperty("radius").GetDouble());
+        Assert.Equal(JsonValueKind.Null, serializedEdge.GetProperty("radiusX").ValueKind);
+    }
 
     [Fact]
     public void SuccessPayloadUsesDocumentedPropertyNames()
