@@ -1,0 +1,14 @@
+{
+	"mcpServers": {
+		"revit": {
+			"type": "local",
+			"command": "dotnet",
+			"args": [
+				"D:\\Repos\\RevitMCP\\artifacts\\server\\RevitMCP.Server.dll"
+			],
+			"tools": [
+				"*"
+			]
+		}
+	}
+}
