@@ -1,0 +1,59 @@
+info: RevitMCP.Server[0]
+      Server starting. File log: C:\Users\aop\AppData\Local\RevitMCP\logs\server-50280.log
+info: ModelContextProtocol.Server.StdioServerTransport[857250842]
+      Server (stream) (RevitMCP.Server) transport reading messages.
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: D:\Repos\RevitMCP
+info: ModelContextProtocol.Server.McpServer[570385771]
+      Server (RevitMCP.Server 1.0.0.0) method 'initialize' request handler called.
+info: ModelContextProtocol.Server.McpServer[1867955179]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'initialize' request handler completed in 19.8502ms.
+info: ModelContextProtocol.Server.McpServer[570385771]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'logging/setLevel' request handler called.
+info: ModelContextProtocol.Server.McpServer[1867955179]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'logging/setLevel' request handler completed in 1.5944ms.
+info: ModelContextProtocol.Server.McpServer[570385771]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'tools/list' request handler called.
+info: ModelContextProtocol.Server.McpServer[1867955179]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'tools/list' request handler completed in 11.5357ms.
+info: ModelContextProtocol.Server.McpServer[570385771]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'tools/call' request handler called.
+info: RevitMCP.Server.RevitBridgeClient[0]
+      Revit request list_walls started.
+info: RevitMCP.Server.RevitBridgeClient[0]
+      Revit request list_walls connecting to Revit PID 44912.
+fail: RevitMCP.Server.RevitBridgeClient[0]
+      Revit bridge request list_walls failed.
+      System.TimeoutException: The operation has timed out.
+         at System.IO.Pipes.NamedPipeClientStream.ConnectInternal(Int32 timeout, CancellationToken cancellationToken, Int32 startTime)
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread threadPoolThread, ExecutionContext executionContext, ContextCallback callback, Object state)
+      --- End of stack trace from previous location ---
+         at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread threadPoolThread, ExecutionContext executionContext, ContextCallback callback, Object state)
+         at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+      --- End of stack trace from previous location ---
+         at RevitMCP.Server.RevitBridgeClient.SendAsync(BridgeRequest request, CancellationToken cancellationToken) in D:\Repos\RevitMCP\src\RevitMCP.Server\RevitBridgeClient.cs:line 26
+fail: ModelContextProtocol.Server.McpServer[1433779783]
+      "list_walls" threw an unhandled exception.
+      ModelContextProtocol.McpException: Revit bridge failed: The operation has timed out.. Ensure Revit 2026 is running and the RevitMCP add-in is installed.
+         at RevitMCP.Server.RevitBridgeClient.SendAsync(BridgeRequest request, CancellationToken cancellationToken) in D:\Repos\RevitMCP\src\RevitMCP.Server\RevitBridgeClient.cs:line 50
+         at Microsoft.Extensions.AI.AIFunctionFactory.ReflectionAIFunctionDescriptor.<>c__DisplayClass41_1.<<GetReturnParameterMarshaller>b__10>d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Microsoft.Extensions.AI.AIFunctionFactory.ReflectionAIFunction.InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+         at Microsoft.Extensions.AI.AIFunctionFactory.ReflectionAIFunction.InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+         at ModelContextProtocol.Server.AIFunctionMcpServerTool.InvokeAsync(RequestContext`1 request, CancellationToken cancellationToken)
+         at ModelContextProtocol.Server.McpServerImpl.<>c__DisplayClass85_1.<<BuildComposedCallToolHandler>g__InvokeOrdinaryPipelineAsync|1>d.MoveNext()
+info: ModelContextProtocol.Server.McpServer[1867955179]
+      Server (RevitMCP.Server 1.0.0.0), Client (inspector-cli 2.11.0) method 'tools/call' request handler completed in 5120.5212ms.
+info: ModelContextProtocol.Server.StdioServerTransport[1221292038]
+      Server (stream) (RevitMCP.Server) transport completed reading messages.
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...
+info: ModelContextProtocol.Server.StdioServerTransport[1375634372]
+      Server (stream) (RevitMCP.Server) shutting down.
+info: ModelContextProtocol.Server.StdioServerTransport[1256455528]
+      Server (stream) (RevitMCP.Server) shut down.
+{"error":{"code":"tool_is_error","message":"Tool 'list_walls' returned isError:true."}}

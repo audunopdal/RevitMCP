@@ -16,11 +16,17 @@ public sealed class McpServerTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
         var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
-        Assert.Equal(new[] { "get_active_document", "get_element_info", "get_selection", "list_elements", "list_levels", "list_walls", "list_walls_with_comments" },
+        Assert.Equal(new[] { "classify_view_elements", "get_active_document", "get_element_info", "get_element_mesh", "get_selection", "list_door_geometry", "list_doors", "list_elements", "list_levels", "list_view_elements", "list_walls", "list_walls_with_comments" },
             tools.Select(tool => tool.Name).Order().ToArray());
         var elementTool = Assert.Single(tools.Where(tool => tool.Name == "list_elements"));
         Assert.Equal("boolean", elementTool.JsonSchema.GetProperty("properties")
             .GetProperty("modelObjectsOnly").GetProperty("type").GetString());
+        var classificationTool = Assert.Single(tools.Where(tool => tool.Name == "classify_view_elements"));
+        Assert.Contains("viewName", classificationTool.JsonSchema.GetProperty("required")
+            .EnumerateArray().Select(value => value.GetString()));
+        var meshTool = Assert.Single(tools.Where(tool => tool.Name == "get_element_mesh"));
+        Assert.Contains("elementId", meshTool.JsonSchema.GetProperty("required")
+            .EnumerateArray().Select(value => value.GetString()));
 
         var result = await client.CallToolAsync("get_active_document",
             new Dictionary<string, object?>(), cancellationToken: timeout.Token);
@@ -54,14 +60,29 @@ public sealed class McpServerTests
     [InlineData("list_walls_with_comments", 0, 101)]
     [InlineData("list_walls_with_comments", -1, 1)]
     [InlineData("list_walls_with_comments", 0, 0)]
+    [InlineData("list_doors", 0, 101)]
+    [InlineData("list_doors", -1, 1)]
+    [InlineData("list_doors", 0, 0)]
+    [InlineData("list_door_geometry", 0, 6)]
+    [InlineData("list_door_geometry", -1, 1)]
+    [InlineData("list_door_geometry", 0, 0)]
+    [InlineData("list_view_elements", 0, 101)]
+    [InlineData("list_view_elements", -1, 1)]
+    [InlineData("list_view_elements", 0, 0)]
     public async Task InvalidPaginationBecomesMcpToolError(string operation, int offset, int limit)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var client = await CreateClientAsync(100_000_996, timeout.Token);
+        var arguments = new Dictionary<string, object?> { ["offset"] = offset, ["limit"] = limit };
+        if (operation == "list_view_elements")
+            arguments["viewName"] = "Floor Plan";
         var result = await client.CallToolAsync(operation,
-            new Dictionary<string, object?> { ["offset"] = offset, ["limit"] = limit }, cancellationToken: timeout.Token);
+            arguments, cancellationToken: timeout.Token);
         Assert.True(result.IsError);
-        Assert.Contains("between 1 and 100", Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        string expectedMessage = operation == "list_door_geometry" && limit > 5
+            ? "between 1 and 5"
+            : "between 1 and 100";
+        Assert.Contains(expectedMessage, Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
     }
 
     [Theory]
@@ -69,19 +90,27 @@ public sealed class McpServerTests
     [InlineData("list_levels")]
     [InlineData("list_walls")]
     [InlineData("list_walls_with_comments")]
+    [InlineData("list_doors")]
+    [InlineData("list_door_geometry")]
+    [InlineData("list_view_elements")]
     public async Task PaginationArgumentsReachRevit(string operation)
     {
         await using var fake = new FakeRevitBridge(BridgeResponse.Success(
             new Page<long>(new[] { 5_000_000_000L }, 3, 1, 2)));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var arguments = new Dictionary<string, object?> { ["offset"] = 1, ["limit"] = 1 };
+        if (operation == "list_view_elements")
+            arguments["viewName"] = "Floor Plan";
         var result = await client.CallToolAsync(operation,
-            new Dictionary<string, object?> { ["offset"] = 1, ["limit"] = 1 }, cancellationToken: timeout.Token);
+            arguments, cancellationToken: timeout.Token);
         Assert.NotEqual(true, result.IsError);
         BridgeRequest request = await fake.Request;
         Assert.Equal(operation, request.Operation);
         Assert.Equal(1, request.Offset);
         Assert.Equal(1, request.Limit);
+        if (operation == "list_view_elements")
+            Assert.Equal("Floor Plan", request.ViewName);
     }
 
     [Fact]
@@ -138,6 +167,28 @@ public sealed class McpServerTests
         Assert.Equal(new BridgeRequest("list_elements"), await fake.Request);
     }
 
+    [Fact]
+    public async Task ViewElementListingForwardsViewNameAndPagination()
+    {
+        var element = new ElementInfo(123, "view-element", "Wall", "Walls", 42);
+        await using var fake = new FakeRevitBridge(BridgeResponse.Success(
+            new Page<ElementInfo>(new[] { element }, 2, 10, 11)));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var result = await client.CallToolAsync("list_view_elements",
+            new Dictionary<string, object?> { ["viewName"] = "Floor Plan", ["offset"] = 10, ["limit"] = 1 },
+            cancellationToken: timeout.Token);
+        Assert.NotEqual(true, result.IsError);
+        using var data = JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        Page<ElementInfo>? page = data.RootElement.Deserialize<Page<ElementInfo>>(BridgeProtocol.JsonOptions);
+        Assert.NotNull(page);
+        Assert.Equal(element, Assert.Single(page.Items));
+        Assert.Equal(2, page.Total);
+        Assert.Equal(11, page.NextOffset);
+        Assert.Equal(new BridgeRequest("list_view_elements", Offset: 10, Limit: 1, ViewName: "Floor Plan"),
+            await fake.Request);
+    }
+
     [Theory]
     [InlineData(0, 1, 1, "ft", 1.0, "list_walls")]
     [InlineData(1, 100, null, "ft", 1.0, "list_walls")]
@@ -189,6 +240,125 @@ public sealed class McpServerTests
         Assert.Equal(0, data.RootElement.GetProperty("total").GetInt32());
         Assert.Equal(JsonValueKind.Null, data.RootElement.GetProperty("nextOffset").ValueKind);
         Assert.Equal(new BridgeRequest(operation), await fake.Request);
+    }
+
+    [Fact]
+    public async Task DoorListingDefaultsAndPaginationArePreserved()
+    {
+        var door = new ElementInfo(5_000_000_000, "door-unique-id", "Door 900 x 2100", "Doors", 42);
+        await using var fake = new FakeRevitBridge(BridgeResponse.Success(
+            new Page<ElementInfo>(new[] { door }, 3, 0, 1)));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var result = await client.CallToolAsync("list_doors",
+            new Dictionary<string, object?>(), cancellationToken: timeout.Token);
+        Assert.NotEqual(true, result.IsError);
+        using var data = JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        Page<ElementInfo>? page = data.RootElement.Deserialize<Page<ElementInfo>>(BridgeProtocol.JsonOptions);
+        Assert.NotNull(page);
+        Assert.Equal(door, Assert.Single(page.Items));
+        Assert.Equal(3, page.Total);
+        Assert.Equal(1, page.NextOffset);
+        Assert.Equal(new BridgeRequest("list_doors"), await fake.Request);
+    }
+
+    [Fact]
+    public async Task DoorGeometryListingPreservesMeasurementsAndPagination()
+    {
+        var edge = new DoorEdgeInfo(0, "Arc", 120, 60, null, null);
+        var solid = new DoorSolidInfo(0, 6, 12, 4.5, 20, new DoorBounds(900, 2100, 150), new[] { edge });
+        var door = new DoorGeometryInfo(123, "Door", true, "mm", new[] { solid }, Array.Empty<string>());
+        await using var fake = new FakeRevitBridge(BridgeResponse.Success(
+            new Page<DoorGeometryInfo>(new[] { door }, 2, 0, 1)));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var result = await client.CallToolAsync("list_door_geometry",
+            new Dictionary<string, object?>(), cancellationToken: timeout.Token);
+        Assert.NotEqual(true, result.IsError);
+        using var data = JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        Page<DoorGeometryInfo>? page = data.RootElement.Deserialize<Page<DoorGeometryInfo>>(BridgeProtocol.JsonOptions);
+        Assert.NotNull(page);
+        DoorGeometryInfo actualDoor = Assert.Single(page.Items);
+        Assert.Equal(door.Id, actualDoor.Id);
+        Assert.Equal(door.Unit, actualDoor.Unit);
+        DoorSolidInfo actualSolid = Assert.Single(actualDoor.Solids);
+        Assert.Equal(solid.Bounds, actualSolid.Bounds);
+        Assert.Equal(edge, Assert.Single(actualSolid.Edges));
+        Assert.Equal(2, page.Total);
+        Assert.Equal(1, page.NextOffset);
+        Assert.Equal(new BridgeRequest("list_door_geometry", Limit: 1), await fake.Request);
+    }
+
+    [Theory]
+    [InlineData("mesh_fallback")]
+    [InlineData("skipped")]
+    [InlineData("failed")]
+    public async Task ClassificationPreservesStatusAndForwardsView(string status)
+    {
+        var item = new ElementExportInfo(new ElementInfo(123, "uid", "Unknown family", null, 42),
+            "FamilyInstance", null, null, null, null, status, "Explicit reason");
+        await using var fake = new FakeRevitBridge(BridgeResponse.Success(
+            new Page<ElementExportInfo>(new[] { item }, 3, 1, 2)));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var result = await client.CallToolAsync("classify_view_elements",
+            new Dictionary<string, object?> { ["viewName"] = "E3D_ARK_L201", ["offset"] = 1, ["limit"] = 1 },
+            cancellationToken: timeout.Token);
+        Assert.NotEqual(true, result.IsError);
+        using var data = JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        var page = data.RootElement.Deserialize<Page<ElementExportInfo>>(BridgeProtocol.JsonOptions)!;
+        Assert.Equal(item, Assert.Single(page.Items));
+        Assert.Equal(2, page.NextOffset);
+        Assert.Equal(new BridgeRequest("classify_view_elements", Offset: 1, Limit: 1, ViewName: "E3D_ARK_L201"),
+            await fake.Request);
+    }
+
+    [Fact]
+    public async Task MeshToolPreservesTrianglesMaterialsAnd64BitElementId()
+    {
+        var info = new ElementExportInfo(new ElementInfo(5_000_000_000, "uid", "Equipment", "Generic Models", 42),
+            "FamilyInstance", -2000151, "Model", null, null, "mesh_fallback", "Surface triangles");
+        var triangle = new MeshTriangleInfo(new PointInfo(0, 0, 0), new PointInfo(10, 0, 0),
+            new PointInfo(0, 10, 0), 43);
+        var material = new MeshMaterialInfo(43, "Steel", 100, 101, 102, 0);
+        var payload = new ElementMeshInfo(info, "mm", new PointInfo(1000, 2000, 3000),
+            new Page<MeshTriangleInfo>(new[] { triangle }, 2, 1, null), new[] { material });
+        await using var fake = new FakeRevitBridge(BridgeResponse.Success(payload));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(fake.ProcessId, timeout.Token);
+        var result = await client.CallToolAsync("get_element_mesh",
+            new Dictionary<string, object?> { ["elementId"] = info.Element.Id, ["offset"] = 1, ["limit"] = 1 },
+            cancellationToken: timeout.Token);
+        Assert.NotEqual(true, result.IsError);
+        using var data = JsonDocument.Parse(Assert.Single(result.Content.OfType<TextContentBlock>()).Text);
+        var mesh = data.RootElement.Deserialize<ElementMeshInfo>(BridgeProtocol.JsonOptions)!;
+        Assert.Equal(info, mesh.Element);
+        Assert.Equal(triangle, Assert.Single(mesh.Triangles.Items));
+        Assert.Equal(material, Assert.Single(mesh.Materials));
+        Assert.Equal(payload.OriginShared, mesh.OriginShared);
+        Assert.Equal("relativeToOriginShared", mesh.VertexSpace);
+        Assert.Null(mesh.Triangles.NextOffset);
+        Assert.Equal(new BridgeRequest("get_element_mesh", ElementId: info.Element.Id, Offset: 1, Limit: 1),
+            await fake.Request);
+    }
+
+    [Theory]
+    [InlineData("get_element_mesh", 0L, null, 0, 100)]
+    [InlineData("get_element_mesh", 1L, null, -1, 100)]
+    [InlineData("get_element_mesh", 1L, null, 0, 101)]
+    [InlineData("classify_view_elements", null, "", 0, 10)]
+    [InlineData("classify_view_elements", null, "View", 0, 0)]
+    public async Task MeshExportInvalidArgumentsReturnToolError(string operation, long? id, string? view, int offset, int limit)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await CreateClientAsync(100_000_996, timeout.Token);
+        var arguments = new Dictionary<string, object?> { ["offset"] = offset, ["limit"] = limit };
+        if (operation == "get_element_mesh")
+            arguments["elementId"] = id;
+        else
+            arguments["viewName"] = view;
+        var result = await client.CallToolAsync(operation, arguments, cancellationToken: timeout.Token);
+        Assert.True(result.IsError);
     }
 
     private static Task<McpClient> CreateClientAsync(int processId, CancellationToken cancellationToken)

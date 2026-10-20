@@ -5,3 +5,8 @@ TestResults/
 .vs/
 *.user
 *.suo
+*.rvt
+Revit_temp/
+L201_backup/
+RevitModel/
+

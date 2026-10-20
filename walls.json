@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "An error occurred invoking 'list_walls': Revit bridge failed: The operation has timed out.. Ensure Revit 2026 is running and the RevitMCP add-in is installed."
+    }
+  ],
+  "isError": true
+}
